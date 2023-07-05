@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Enhanced OS with Microkernel and Compiler</title>
+  <style>
+    #terminal {
+      /* CSS styling for the terminal */
+      background-color: black;
+      color: white;
+      font-family: monospace;
+      height: 400px;
+      overflow-y: scroll;
+      padding: 10px;
+    }
+    .error {
+      color: red;
+    }
+    .disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <textarea id="codeInput" rows="10" cols="50" placeholder="Enter your code here"></textarea>
+  <br>
+  <button id="compileButton">Compile</button>
+  <button id="downloadButton" disabled>Download</button>
+  <br>
+  <input type="file" id="uploadFile" accept=".txt">
+  <br>
+  <input type="text" id="commandInput" autofocus />
+  <button id="recoveryButton" class="disabled" onclick="recoverOS()">Recover OS</button>
+  <br>
+  <input type="text" id="usernameInput" placeholder="Username" />
+  <input type="password" id="passwordInput" placeholder="Password" />
+  <button id="loginButton">Login</button>
+
+  <script>
+    // Define the microkernel
+    const microkernel = {
+      services: {},
+      registerService: function (serviceName, service, description) {
+        this.services[serviceName] = {
+          service,
+          description
+        };
+      },
+      executeService: function (serviceName, args) {
+        if (serviceName in this.services) {
+          const service = this.services[serviceName].service;
+          if (typeof service === "function") {
+            try {
+              return service(args);
+            } catch (error) {
+              handleFatalError(error);
+            }
+          } else {
+            return service;
+          }
+        } else {
+          return "Service not found.";
+        }
+      },
+    };
+
+    // Define the custom compiler
+    const compiler = {
+      tokens: [],
+      currentToken: 0,
+
+      compile: function (code) {
+        this.tokens = this.tokenize(code);
+        this.currentToken = 0;
+        const result = this.parseExpression();
+        if (this.currentToken !== this.tokens.length) {
+          throw new Error("Syntax error.");
+        }
+        return `Result: ${result}`;
+      },
+
+      tokenize: function (code) {
+        // Simple tokenizer that splits code into tokens
+        return code
+          .replace(/\s+/g, "") // Remove whitespace
+          .split(/([()+\-*/])/) // Split by parentheses and operators
+          .filter(token => token.length > 0);
+      },
+
+      parseExpression: function () {
+        let result = this.parseTerm();
+        while (this.currentToken < this.tokens.length && (this.tokens[this.currentToken] === "+" || this.tokens[this.currentToken] === "-")) {
+          const operator = this.tokens[this.currentToken++];
+          const term = this.parseTerm();
+          if (operator === "+") {
+            result += term;
+          } else if (operator === "-") {
+            result -= term;
+          }
+        }
+        return result;
+      },
+
+      parseTerm: function () {
+        let result = this.parseFactor();
+        while (this.currentToken < this.tokens.length && (this.tokens[this.currentToken] === "*" || this.tokens[this.currentToken] === "/")) {
+          const operator = this.tokens[this.currentToken++];
+          const factor = this.parseFactor();
+          if (operator === "*") {
+            result *= factor;
+          } else if (operator === "/") {
+            result /= factor;
+          }
+        }
+        return result;
+      },
+
+      parseFactor: function () {
+        if (this.currentToken < this.tokens.length) {
+          const token = this.tokens[this.currentToken++];
+          if (token === "(") {
+            const result = this.parseExpression();
+            if (this.currentToken < this.tokens.length && this.tokens[this.currentToken++] !== ")") {
+              throw new Error("Mismatched parentheses.");
+            }
+            return result;
+          } else if (!isNaN(Number(token))) {
+            return Number(token);
+          } else {
+            throw new Error("Invalid token.");
+          }
+        } else {
+          throw new Error("Unexpected end of code.");
+        }
+      },
+    };
+
+    // Define user management system
+    const userSystem = {
+      users: {},
+      currentUser: null,
+
+      createUser: function (username, password) {
+        this.users[username] = {
+          password,
+          workspace: {
+            code: "",
+            terminal: ""
+          }
+        };
+      },
+
+      login: function (username, password) {
+        if (username in this.users) {
+          const user = this.users[username];
+          if (user.password === password) {
+            this.currentUser = username;
+            codeInput.value = user.workspace.code;
+            writeToTerminal(user.workspace.terminal);
+            enableDownloadButton();
+            enableRecoveryButton();
+            writeToTerminal(`<span class="success">Logged in as ${username}.</span>`);
+          } else {
+            writeToTerminal(`<span class="error">Incorrect password.</span>`);
+          }
+        } else {
+          writeToTerminal(`<span class="error">User not found.</span>`);
+        }
+      },
+
+      logout: function () {
+        this.currentUser = null;
+        codeInput.value = "";
+        clearTerminal();
+        disableDownloadButton();
+        disableRecoveryButton();
+        writeToTerminal(`<span class="success">Logged out successfully.</span>`);
+      },
+
+      saveCode: function (code) {
+        if (this.currentUser) {
+          const user = this.users[this.currentUser];
+          user.workspace.code = code;
+          writeToTerminal(`<span class="success">Code saved successfully.</span>`);
+        } else {
+          writeToTerminal(`<span class="error">No user logged in.</span>`);
+        }
+      },
+
+      saveTerminal: function (terminal) {
+        if (this.currentUser) {
+          const user = this.users[this.currentUser];
+          user.workspace.terminal = terminal;
+          writeToTerminal(`<span class="success">Terminal output saved successfully.</span>`);
+        } else {
+          writeToTerminal(`<span class="error">No user logged in.</span>`);
+        }
+      }
+    };
+
+    // Register services in the microkernel
+    microkernel.registerService("help", function () {
+      let output = "";
+      for (const serviceName in microkernel.services) {
+        const service = microkernel.services[serviceName];
+        output += `<p><strong>${serviceName}</strong> - ${service.description}</p>`;
+      }
+      return output;
+    }, "Show available commands");
+
+    microkernel.registerService("clear", function () {
+      clearTerminal();
+    }, "Clear the terminal");
+
+    microkernel.registerService("date", function () {
+      const currentDate = new Date();
+      return currentDate.toString();
+    }, "Show the current date and time");
+
+    microkernel.registerService("compile", function (args) {
+      const code = args.join(" ");
+      try {
+        const result = compiler.compile(code);
+        return result;
+      } catch (error) {
+        return `<span class="error">${error.message}</span>`;
+      }
+    }, "Compile and evaluate a mathematical expression");
+
+    microkernel.registerService("save", function (args) {
+      const fileData = args.join(" ");
+      userSystem.saveCode(fileData);
+    }, "Save the current code");
+
+    microkernel.registerService("load", function () {
+      const fileInput = document.getElementById("uploadFile");
+      fileInput.click();
+      fileInput.addEventListener("change", function () {
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          const fileData = event.target.result;
+          codeInput.value = fileData;
+          writeToTerminal(`<span class="success">Code loaded successfully.</span>`);
+        };
+        reader.readAsText(file);
+      });
+    }, "Load code from a file");
+
+    function writeToTerminal(output) {
+      const terminal = document.getElementById("terminal");
+      terminal.innerHTML += output + "<br>";
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function clearTerminal() {
+      const terminal = document.getElementById("terminal");
+      terminal.innerHTML = "";
+    }
+
+    function handleFatalError(error) {
+      writeToTerminal(`<span class="error">Fatal error: ${error.message}</span>`);
+      disableDownloadButton();
+      disableRecoveryButton();
+    }
+
+    function enableDownloadButton() {
+      const downloadButton = document.getElementById("downloadButton");
+      downloadButton.disabled = false;
+    }
+
+    function disableDownloadButton() {
+      const downloadButton = document.getElementById("downloadButton");
+      downloadButton.disabled = true;
+    }
+
+    function enableRecoveryButton() {
+      const recoveryButton = document.getElementById("recoveryButton");
+      recoveryButton.classList.remove("disabled");
+    }
+
+    function disableRecoveryButton() {
+      const recoveryButton = document.getElementById("recoveryButton");
+      recoveryButton.classList.add("disabled");
+    }
+
+    function recoverOS() {
+      if (userSystem.currentUser) {
+        const user = userSystem.users[userSystem.currentUser];
+        codeInput.value = user.workspace.code;
+        writeToTerminal(user.workspace.terminal);
+        enableDownloadButton();
+        enableRecoveryButton();
+        writeToTerminal(`<span class="success">OS recovered for ${userSystem.currentUser}.</span>`);
+      } else {
+        writeToTerminal(`<span class="error">No user logged in.</span>`);
+      }
+    }
+
+    // Event handlers
+    document.getElementById("compileButton").addEventListener("click", function () {
+      const code = codeInput.value;
+      const result = microkernel.executeService("compile", [code]);
+      writeToTerminal(result);
+    });
+
+    document.getElementById("downloadButton").addEventListener("click", function () {
+      const code = codeInput.value;
+      const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+      const filename = "code.txt";
+      if (navigator.msSaveBlob) {
+        // IE 10+
+        navigator.msSaveBlob(blob, filename);
+      } else {
+        const link = document.createElement("a");
+        if (link.download !== undefined) {
+          // Browsers that support HTML5 download attribute
+          const url = URL.createObjectURL(blob);
+          link.setAttribute("href", url);
+          link.setAttribute("download", filename);
+          link.style.visibility = "hidden";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      }
+    });
+
+    document.getElementById("commandInput").addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const command = this.value.trim();
+        if (command.length > 0) {
+          const parts = command.split(" ");
+          const serviceName = parts[0];
+          const args = parts.slice(1);
+          const result = microkernel.executeService(serviceName, args);
+          writeToTerminal(result);
+          this.value = "";
+        }
+      }
+    });
+
+    document.getElementById("loginButton").addEventListener("click", function () {
+      const username = document.getElementById("usernameInput").value;
+      const password = document.getElementById("passwordInput").value;
+      userSystem.login(username, password);
+    });
+
+    document.getElementById("usernameInput").addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        document.getElementById("passwordInput").focus();
+      }
+    });
+
+    document.getElementById("passwordInput").addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        document.getElementById("loginButton").click();
+      }
+    });
+
+    // Initialize the user system
+    userSystem.createUser("user1", "password1");
+    userSystem.createUser("user2", "password2");
+
+    // Display initial message
+    writeToTerminal("<strong>Welcome to the Enhanced OS with Microkernel and Compiler!</strong>");
+    writeToTerminal("Type 'help' to see available commands.");
+  </script>
+</body>
+</html>
